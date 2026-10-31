@@ -1,0 +1,225 @@
+<title>Крис и Воля</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@700&display=swap" rel="stylesheet">
+<style>
+/* Layout: one centered square canvas. The name Maria runs around a heart outline, then more rings of the name flow in and fill the heart. Single dark neon look by choice. */
+:root {
+  --bg: #0b0208;
+  --bg-glow: #2c0620;
+  --pink: #ff4fa8;
+  --pink-hot: #ff1f8f;
+  --core: #ffe3f1;
+  --font-display: 'Comfortaa', 'Trebuchet MS', system-ui, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  background-image: radial-gradient(circle at 50% 46%, var(--bg-glow) 0%, var(--bg) 64%);
+  color: var(--core);
+  font-family: var(--font-display);
+  display: grid;
+  place-items: center;
+  padding-block: 16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
+  overflow: hidden;
+}
+#heart {
+  display: block;
+  width: min(100%, 86vh, 820px);
+  max-width: 100%;
+  aspect-ratio: 1 / 1;
+  cursor: pointer;
+}
+</style>
+
+<canvas id="heart" role="img" aria-label="Розовое светящееся сердце: имена Крис и Воля движутся по контуру сердца и постепенно заполняют его. Нажмите, чтобы запустить заново."></canvas>
+
+<script>
+(function () {
+  var cv = document.getElementById('heart');
+  var ctx = cv.getContext('2d');
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var WORDS = [['Крис', 'КРИС', 'крис'], ['Воля', 'ВОЛЯ', 'воля']];
+  var FONT = "700 {s}px Comfortaa, 'Trebuchet MS', system-ui, sans-serif";
+  var PINK = '#ff4fa8', HOT = '#ff1f8f', CORE = '#ffe3f1';
+  var BRIGHT = ['#ff4fa8', '#ff4fa8', '#ff4fa8', '#ff8ec9', '#ffc4e1'];
+
+  var CYCLE = 44, FADE_START = 38, FADE_LEN = 5;
+  var RING_COUNT = 8;
+  var W = 600, rings = [];
+  var pageStart = performance.now();
+  var t0 = pageStart - 2200; // first frame already shows a growing train of names
+  var restartAt = 0;
+
+  function rng(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // classic heart curve, y up, centered on its bounding box
+  var RAW = (function (n) {
+    var pts = [];
+    for (var i = 0; i <= n; i++) {
+      var t = (i / n) * Math.PI * 2;
+      pts.push([
+        16 * Math.pow(Math.sin(t), 3),
+        13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t) + 2.5
+      ]);
+    }
+    return pts;
+  })(1400);
+
+  function build() {
+    var rect = cv.getBoundingClientRect();
+    W = Math.max(240, rect.width || 600);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(W * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    var fs = W * 0.036;
+    ctx.font = FONT.replace('{s}', fs);
+    var ww = 0;
+    WORDS.forEach(function (g) { g.forEach(function (s) { ww += ctx.measureText(s).width; }); });
+    ww /= 6;
+    var lh = fs * 1.25;
+    var cx = W / 2, cy = W * 0.5;
+
+    rings = [];
+    for (var k = 0; k < RING_COUNT; k++) {
+      var sc = W * 0.0222 * (1 - k * 0.125);
+      var pts = RAW.map(function (p) { return [cx + p[0] * sc, cy - p[1] * sc]; });
+      // spacing is measured in "word units": one word width sideways, one line height up or down
+      var cum = [0];
+      for (var i = 1; i < pts.length; i++) {
+        var dx = (pts[i][0] - pts[i - 1][0]) / ww;
+        var dy = (pts[i][1] - pts[i - 1][1]) / lh;
+        cum.push(cum[i - 1] + Math.hypot(dx, dy));
+      }
+      var Lm = cum[cum.length - 1];
+      var N = Math.max(3, Math.round(Lm / 1.05));
+      var rnd = rng(11 + k * 101);
+      var words = [];
+      for (var j = 0; j < N; j++) {
+        var r = rnd();
+        var depth = Math.pow(rnd(), 1.4);
+        words.push({
+          text: WORDS[(j + k) % 2][r < 0.45 ? 0 : (r < 0.75 ? 1 : 2)],
+          depth: depth,
+          color: BRIGHT[Math.floor(rnd() * BRIGHT.length)],
+          ph: rnd() * 6.28
+        });
+      }
+      rings.push({
+        pts: pts, cum: cum, Lm: Lm, N: N, words: words,
+        start: k === 0 ? 0.3 : 6 + (k - 1) * 2.6,
+        dur: k === 0 ? 6 : 9,
+        dir: k % 2 === 0 ? 1 : -1,
+        speed: 0.2 + 0.03 * (k % 3)
+      });
+    }
+    rings.fs = fs;
+  }
+
+  function posM(r, m) {
+    var lo = 0, hi = r.cum.length - 1;
+    while (hi - lo > 1) {
+      var mid = (lo + hi) >> 1;
+      if (r.cum[mid] <= m) lo = mid; else hi = mid;
+    }
+    var seg = r.cum[hi] - r.cum[lo] || 1;
+    var f = (m - r.cum[lo]) / seg;
+    return [
+      r.pts[lo][0] + (r.pts[hi][0] - r.pts[lo][0]) * f,
+      r.pts[lo][1] + (r.pts[hi][1] - r.pts[lo][1]) * f
+    ];
+  }
+
+  function drawRing(r, c, tt, fade) {
+    var fs = rings.fs;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (var i = 0; i < r.N; i++) {
+      var w = r.words[i];
+      var birth = r.start + (i / r.N) * r.dur;
+      var a = (c - birth) / 2.6;
+      if (a <= 0) continue;
+      if (a > 1) a = 1;
+      a = a * a * (3 - 2 * a);
+      var idx = (((i + r.dir * r.speed * tt) % r.N) + r.N) % r.N;
+      var p = posM(r, idx * (r.Lm / r.N));
+      var size = fs * (0.78 + 0.4 * (1 - w.depth));
+      var flick = reduce ? 1 : 0.92 + 0.08 * Math.sin(tt * 1.1 + w.ph);
+      var alpha = a * (0.5 + 0.5 * (1 - w.depth)) * flick * fade;
+      if (alpha < 0.02) continue;
+
+      ctx.font = FONT.replace('{s}', size.toFixed(1));
+      // glow pass
+      ctx.shadowColor = HOT;
+      ctx.shadowBlur = size * (0.7 + w.depth * 1.3);
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.fillStyle = w.color;
+      ctx.fillText(w.text, p[0], p[1]);
+      // soft ghost beside the word, like the smeared copies in the video
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = alpha * 0.28;
+      ctx.fillText(w.text, p[0] + size * 0.3, p[1]);
+      // bright core on the near words
+      if (w.depth < 0.55) {
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.fillStyle = CORE;
+        ctx.fillText(w.text, p[0], p[1]);
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  function frame(now) {
+    var el = (now - t0) / 1000;
+    var tt = reduce ? 0 : (now - pageStart) / 1000;
+    var c = reduce ? 34 : el % CYCLE;
+    var fade = 1;
+    if (c > FADE_START) {
+      var f = Math.min(1, (c - FADE_START) / FADE_LEN);
+      fade = 1 - f * f * (3 - 2 * f);
+    }
+    if (restartAt) {
+      var rf = Math.min(1, (now - restartAt) / 1800);
+      fade *= 1 - rf * rf * (3 - 2 * rf);
+      if (rf >= 1) { t0 = now; restartAt = 0; }
+    }
+
+    ctx.clearRect(0, 0, W, W);
+    for (var k = rings.length - 1; k >= 0; k--) drawRing(rings[k], c, tt, fade);
+    requestAnimationFrame(frame);
+  }
+
+  build();
+  requestAnimationFrame(frame);
+
+  var fontsReady = (document.fonts && document.fonts.load)
+    ? document.fonts.load('700 40px Comfortaa', 'Крис Воля КРИС ВОЛЯ').catch(function () {})
+    : Promise.resolve();
+  fontsReady.then(build);
+
+  cv.addEventListener('click', function () { if (!restartAt) restartAt = performance.now(); });
+
+  var timer;
+  window.addEventListener('resize', function () {
+    clearTimeout(timer);
+    timer = setTimeout(build, 80);
+  });
+})();
+</script>
